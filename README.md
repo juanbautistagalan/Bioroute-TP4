@@ -1,4 +1,3 @@
-# Bioroute-TP4
 # BioRoute
 
 Sistema de gestión logística y trazabilidad de alimentos orgánicos desarrollado como prototipo integrador para el Seminario de Práctica de Informática (Módulo 4) de la Universidad Siglo 21.
