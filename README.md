@@ -24,6 +24,7 @@ El alcance del prototipo no es el de un sistema productivo completo, sino un mó
 - Ordenamiento de productos por nivel de stock.
 - Registro de auditoría en archivo local.
 - Prueba de conexión a la base de datos.
+- Portal web para clientes: catálogo con carrito, "Mis pedidos" y seguimiento en tiempo real sobre un mapa.
 
 
 ## Tecnologías
@@ -31,7 +32,10 @@ El alcance del prototipo no es el de un sistema productivo completo, sino un mó
 - Java 17 o superior.
 - MySQL 8.x.
 - JDBC mediante el conector oficial `mysql-connector-j`.
-- Sin frameworks adicionales: el proyecto usa JDBC plano para mostrar el manejo manual de conexiones, transacciones y excepciones.
+- Maven como herramienta de build (`pom.xml`).
+- Persistencia con JDBC plano, sin ORM: el manejo de conexiones, transacciones y excepciones sigue siendo manual.
+- Capa web: Javalin 6 (HTTP + Server-Sent Events) y Jackson para JSON.
+- Frontend: HTML, CSS y JavaScript vanilla, con Leaflet y OpenStreetMap cargados por CDN.
 
 
 ## Estructura del proyecto
@@ -65,8 +69,16 @@ bioroute-tp4/
       HashUtil.java
       Validador.java
       AuditoriaArchivo.java
+    web/
+      ServidorWeb.java
+      public/
+        index.html
+        app.js
+        styles.css
+  bioroute_db.sql
   sql/
-    bioroute_db.sql
+    portal_web.sql
+  pom.xml
   lib/
     (acá va el conector JDBC descargado de MySQL)
   logs/
@@ -83,7 +95,8 @@ bioroute-tp4/
 - JDK 17 o superior instalado y configurado en el PATH.
 - MySQL Server 8.x instalado y corriendo.
 - MySQL Workbench (opcional, para administrar la base con interfaz gráfica).
-- Conector JDBC de MySQL descargado desde https://dev.mysql.com/downloads/connector/j/ (versión Platform Independent).
+- Maven 3.8 o superior (recomendado). Descarga automáticamente el conector JDBC, Javalin y Jackson.
+- Si se compila a mano con `javac`, el conector JDBC de MySQL descargado desde https://dev.mysql.com/downloads/connector/j/ (versión Platform Independent).
 
 
 ## Instalación
@@ -97,27 +110,48 @@ cd BioRoute-Logistica
 
 ### 2. Cargar la base de datos
 
-Abrir MySQL Workbench, conectarse a la instancia local y ejecutar el script `sql/bioroute_db.sql`. El script crea la base `bioroute_db` con las seis tablas necesarias y carga datos iniciales: dos usuarios de prueba, tres clientes y cuatro productos.
+Abrir MySQL Workbench, conectarse a la instancia local y ejecutar el script `bioroute_db.sql`. El script crea la base `bioroute_db` con las seis tablas necesarias y carga datos iniciales: dos usuarios de prueba, tres clientes y cuatro productos.
 
 ### 3. Agregar el conector JDBC
 
-Descargar `mysql-connector-j-X.X.X.jar` y copiarlo dentro de la carpeta `lib/`. Sin este archivo, Java no puede conectarse a MySQL.
+Con Maven no hace falta: el conector se declara en `pom.xml`. Solo para la compilación manual, descargar `mysql-connector-j-X.X.X.jar` y copiarlo dentro de la carpeta `lib/`.
 
 ### 4. Configurar credenciales de conexión
 
-Editar el archivo `src/bioroute/config/ConexionBD.java` y reemplazar el valor de la constante `PASSWORD` por la contraseña real del usuario `root` de MySQL local.
+`ConexionBD` lee las credenciales desde variables de entorno. Si no están definidas, usa los valores por defecto de siempre (`localhost:3306/bioroute_db`, usuario `root`, contraseña `1234`), así que una instalación existente sigue funcionando sin cambios.
 
-```java
-private static final String PASSWORD = "tu_password_de_mysql";
+| Variable | Valor por defecto |
+|---|---|
+| `BIOROUTE_DB_URL` | `jdbc:mysql://localhost:3306/bioroute_db?useSSL=false&serverTimezone=America/Argentina/Buenos_Aires&allowPublicKeyRetrieval=true` |
+| `BIOROUTE_DB_USER` | `root` |
+| `BIOROUTE_DB_PASSWORD` | `1234` |
+
+Ejemplo en Linux/Mac:
+
 ```
+export BIOROUTE_DB_PASSWORD=tu_password_de_mysql
+```
+
+En Windows (PowerShell): `$env:BIOROUTE_DB_PASSWORD="tu_password_de_mysql"`.
 
 
 ## Ejecución
 
-Desde la raíz del proyecto:
+### Consola con Maven
 
 ```
-dir /s /b src\*.java > sources.txt
+mvn package
+java -jar target/bioroute.jar
+```
+
+`target/bioroute.jar` incluye todas las dependencias y arranca la aplicación de consola (`bioroute.Main`).
+
+### Consola con compilación manual
+
+Desde la raíz del proyecto (sin la carpeta `web/`, que necesita Javalin):
+
+```
+dir /s /b *.java | findstr /v "\\web\\" > sources.txt
 javac -encoding UTF-8 -d out @sources.txt
 java -cp "out;lib\mysql-connector-j-9.7.0.jar" bioroute.Main
 ```
@@ -125,6 +159,64 @@ java -cp "out;lib\mysql-connector-j-9.7.0.jar" bioroute.Main
 En Linux o Mac, reemplazar `;` por `:` y `\` por `/` en el classpath.
 
 Una vez que el sistema inicia, se solicita usuario y contraseña.
+
+
+## Portal web para clientes
+
+### 1. Crear el usuario técnico `portal-web`
+
+Los pedidos que se crean desde la web se registran a nombre del usuario técnico `portal-web` (columna `id_usuario` de `pedidos` y del estado inicial). El script `bioroute_db.sql` ya lo crea en instalaciones nuevas. En una base existente, ejecutar:
+
+```
+mysql -u root -p < sql/portal_web.sql
+```
+
+El script es idempotente (se puede correr más de una vez). El usuario no puede iniciar sesión en la consola: su hash es el marcador `SIN-LOGIN`, que nunca coincide con un hash SHA-256 real.
+
+### 2. Levantar el servidor
+
+```
+mvn compile exec:java
+```
+
+o, con el jar empaquetado:
+
+```
+mvn package
+java -cp target/bioroute.jar bioroute.web.ServidorWeb
+```
+
+Luego abrir http://localhost:8080. Variables opcionales:
+
+| Variable | Valor por defecto | Uso |
+|---|---|---|
+| `BIOROUTE_WEB_PUERTO` | `8080` | Puerto HTTP del servidor. |
+| `BIOROUTE_WEB_USUARIO` | `portal-web` | Usuario de `usuarios` al que se asignan los pedidos web. |
+
+Las variables `BIOROUTE_DB_*` también aplican al servidor web.
+
+### 3. Vistas
+
+- **Catálogo**: productos con stock, carrito y formulario de datos del cliente. Al confirmar se busca o crea el cliente por email y se registra el pedido con la misma transacción de `PedidoDAO.crear()` que usa la consola. Los precios se toman siempre de la base.
+- **Mis pedidos**: el cliente ingresa su email y ve sus pedidos con el estado actual.
+- **Seguimiento**: línea de tiempo de estados (Pendiente → En preparación → En ruta → Entregado/Cancelado) actualizada en vivo y un mapa con la ruta desde el depósito hasta la dirección del cliente.
+
+Los cambios de estado se siguen haciendo desde la consola (perfil Administrativo o Repartidor); la web los refleja en pocos segundos.
+
+### 4. API
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /api/productos` | Productos con stock mayor a 0. |
+| `POST /api/clientes` | Body `{nombre, email, telefono, direccion}`. Devuelve el cliente existente con ese email o lo crea. |
+| `POST /api/pedidos` | Body `{idCliente, items: [{idProducto, cantidad}]}`. Devuelve `201` con el pedido creado; `409` si no hay stock. |
+| `GET /api/pedidos?email=` | Pedidos del cliente con ese email, con `estadoActual` y detalle. |
+| `GET /api/pedidos/{id}` | Detalle del pedido e historial de estados. |
+| `GET /api/pedidos/{id}/eventos` | Server-Sent Events: emite el evento `estado` cada 3 s y cierra la conexión cuando el pedido llega a `Entregado` o `Cancelado`. |
+
+### 5. Mapa y posición simulada
+
+No hay GPS real. La dirección del cliente se geocodifica con Nominatim (OpenStreetMap) y la ruta se calcula con el servidor público de OSRM; si alguno no responde, se usa un punto y una ruta aproximados. Mientras el estado es "En ruta", la posición del repartidor se simula interpolando coordenadas a lo largo de la ruta, a partir de la hora en que el pedido pasó a ese estado (recorrido completo de 3 minutos).
 
 
 ## Usuarios de prueba
@@ -217,10 +309,10 @@ El informe técnico completo del trabajo práctico está en `docs/GALAN-JUANBAUT
 
 ## Limitaciones conocidas y próximos pasos
 
-El prototipo no incluye interfaz gráfica, reportes en PDF, integraciones externas ni notificaciones por correo o WhatsApp. Estos puntos quedan como evolución futura. Las líneas de trabajo previstas son:
+El prototipo no incluye interfaz gráfica de escritorio, reportes en PDF, integraciones externas ni notificaciones por correo o WhatsApp. Estos puntos quedan como evolución futura. Las líneas de trabajo previstas son:
 
 - Migrar la interfaz de consola a JavaFX o Swing.
-- Exponer una API REST con Spring Boot para integraciones externas.
+- Agregar autenticación de clientes al portal web y un panel web para el personal.
 - Generar reportes en PDF de pedidos y stock.
 - Implementar bloqueo por intentos fallidos de login.
 - Dockerizar el sistema para facilitar el despliegue.

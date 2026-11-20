@@ -77,6 +77,7 @@ CREATE TABLE estado_pedido (
 -- Usuarios de prueba:
 --   admin01       /  admin123       (perfil Administrativo)
 --   repartidor01  /  reparto123     (perfil Repartidor)
+--   portal-web    /  (sin login)    usuario tecnico del portal web
 -- ---------------------------------------------------------------------
 
 INSERT INTO usuarios (nombre_usuario, hash_contrasena, sal, perfil) VALUES
@@ -87,7 +88,13 @@ INSERT INTO usuarios (nombre_usuario, hash_contrasena, sal, perfil) VALUES
 ('repartidor01',
  'VF0SZ6zY9+wBoU/hhh/vXVO9FLSYsL+DsLfgVDca+PQ=',
  'vxMcmlRcZJBpCsZIyibbbQ==',
- 'Repartidor');
+ 'Repartidor'),
+-- Usuario tecnico que registra los pedidos hechos desde el portal web.
+-- El hash 'SIN-LOGIN' nunca coincide con un SHA-256, asi que no puede iniciar sesion.
+('portal-web',
+ 'SIN-LOGIN',
+ 'AAAAAAAAAAAAAAAAAAAAAA==',
+ 'Administrativo');
 
 INSERT INTO clientes (nombre, telefono, direccion, email) VALUES
 ('Almacen Verde',    '3515551001', 'Av. Colon 1200, Cordoba', 'compras@almacenverde.com'),

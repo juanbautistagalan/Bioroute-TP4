@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BioRoute - Portal de clientes</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="encabezado">
+    <a class="marca" href="#/catalogo">
+      <span class="marca-logo">B</span>
+      <span>BioRoute <small>Alimentos orgánicos</small></span>
+    </a>
+    <nav class="navegacion">
+      <a href="#/catalogo" data-vista="catalogo">Catálogo</a>
+      <a href="#/mis-pedidos" data-vista="mis-pedidos">Mis pedidos</a>
+      <a href="#/seguimiento" data-vista="seguimiento">Seguimiento</a>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Vista 1: catálogo, carrito y datos del cliente -->
+    <section id="vista-catalogo" class="vista">
+      <div class="catalogo-layout">
+        <div>
+          <h1>Catálogo de productos</h1>
+          <p class="subtitulo">Elegí los productos, cargá tus datos y confirmá el pedido.</p>
+          <div id="lista-productos" class="grilla-productos">
+            <p class="cargando">Cargando productos...</p>
+          </div>
+        </div>
+
+        <aside class="panel carrito">
+          <h2>Tu carrito</h2>
+          <ul id="carrito-items" class="carrito-items"></ul>
+          <p id="carrito-vacio" class="vacio">Todavía no agregaste productos.</p>
+          <div class="carrito-total">
+            <span>Total</span>
+            <strong id="carrito-total">$ 0,00</strong>
+          </div>
+
+          <form id="form-cliente" class="formulario" novalidate>
+            <h3>Datos de entrega</h3>
+            <label>Nombre o razón social
+              <input name="nombre" required maxlength="100" autocomplete="name">
+            </label>
+            <label>Email
+              <input name="email" type="email" required maxlength="100" autocomplete="email">
+            </label>
+            <label>Teléfono
+              <input name="telefono" type="tel" maxlength="20" autocomplete="tel">
+            </label>
+            <label>Dirección de entrega
+              <input name="direccion" required maxlength="200" autocomplete="street-address"
+                     placeholder="Calle, número, ciudad">
+            </label>
+            <button id="btn-confirmar" type="submit" class="boton boton-primario" disabled>
+              Confirmar pedido
+            </button>
+            <p id="mensaje-pedido" class="mensaje" hidden></p>
+          </form>
+        </aside>
+      </div>
+    </section>
+
+    <!-- Vista 2: mis pedidos -->
+    <section id="vista-mis-pedidos" class="vista" hidden>
+      <h1>Mis pedidos</h1>
+      <p class="subtitulo">Ingresá el email con el que hiciste tus pedidos.</p>
+      <form id="form-mis-pedidos" class="formulario-linea">
+        <input name="email" type="email" required placeholder="tu@email.com" maxlength="100">
+        <button type="submit" class="boton boton-primario">Buscar</button>
+      </form>
+      <p id="mensaje-mis-pedidos" class="mensaje" hidden></p>
+      <div id="lista-pedidos" class="lista-pedidos"></div>
+    </section>
+
+    <!-- Vista 3: seguimiento en tiempo real -->
+    <section id="vista-seguimiento" class="vista" hidden>
+      <div class="seguimiento-cabecera">
+        <h1>Seguimiento <span id="seg-titulo"></span></h1>
+        <form id="form-seguimiento" class="formulario-linea">
+          <input name="idPedido" type="number" min="1" required placeholder="N° de pedido">
+          <button type="submit" class="boton">Ver</button>
+        </form>
+      </div>
+      <p id="mensaje-seguimiento" class="mensaje" hidden></p>
+
+      <div id="seguimiento-contenido" class="seguimiento-layout" hidden>
+        <div class="panel">
+          <div class="seg-estado">
+            <span id="seg-badge" class="badge"></span>
+            <span id="seg-conexion" class="conexion"></span>
+          </div>
+          <ol id="linea-tiempo" class="linea-tiempo"></ol>
+          <div class="seg-datos">
+            <p><strong>Cliente:</strong> <span id="seg-cliente"></span></p>
+            <p><strong>Entrega en:</strong> <span id="seg-direccion"></span></p>
+            <p><strong>Total:</strong> <span id="seg-total"></span></p>
+            <ul id="seg-detalles" class="seg-detalles"></ul>
+          </div>
+        </div>
+        <div class="panel panel-mapa">
+          <div id="mapa" class="mapa"></div>
+          <p id="seg-progreso" class="progreso"></p>
+          <p class="nota">Ruta y posición del repartidor simuladas (sin GPS real).</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="aviso" class="aviso" hidden></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="app.js"></script>
+</body>
+</html>
