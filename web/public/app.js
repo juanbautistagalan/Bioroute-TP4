@@ -15,7 +15,9 @@ const ETIQUETAS = {
   'Cancelado': 'Cancelado'
 };
 const CLAVE_EMAIL = 'bioroute.email';
-const CLAVE_GEOCODIFICACION = 'bioroute.geo.';
+const CLAVE_GEOCODIFICACION = 'bioroute.geo.v2.';
+// Zona de reparto: resultados más lejos que esto del depósito se descartan
+const RADIO_REPARTO_KM = 60;
 
 const formatoPesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' });
 const formatoFecha = new Intl.DateTimeFormat('es-AR', { dateStyle: 'short', timeStyle: 'short' });
@@ -481,14 +483,21 @@ async function geocodificar(direccion) {
   const guardado = localStorage.getItem(clave);
   if (guardado) return JSON.parse(guardado);
   try {
-    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar&q=' +
-      encodeURIComponent(direccion);
+    const dLat = RADIO_REPARTO_KM / 111;
+    const dLng = RADIO_REPARTO_KM / (111 * Math.cos(DEPOSITO.lat * Math.PI / 180));
+    const viewbox = [DEPOSITO.lng - dLng, DEPOSITO.lat + dLat, DEPOSITO.lng + dLng, DEPOSITO.lat - dLat]
+      .map((n) => n.toFixed(4)).join(',');
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ar' +
+      '&bounded=1&viewbox=' + viewbox + '&q=' + encodeURIComponent(direccion);
     const respuesta = await fetch(url, { headers: { 'Accept-Language': 'es' } });
     const resultados = await respuesta.json();
     if (resultados.length > 0) {
       const punto = { lat: parseFloat(resultados[0].lat), lng: parseFloat(resultados[0].lon) };
-      localStorage.setItem(clave, JSON.stringify(punto));
-      return punto;
+      const km = L.latLng(DEPOSITO.lat, DEPOSITO.lng).distanceTo(L.latLng(punto.lat, punto.lng)) / 1000;
+      if (km <= RADIO_REPARTO_KM) {
+        localStorage.setItem(clave, JSON.stringify(punto));
+        return punto;
+      }
     }
   } catch (e) {
     // sin conexión al geocodificador: se usa un punto simulado
