@@ -44,7 +44,10 @@ public class PedidoDAO {
             // 3. Insertar detalles y descontar stock
             for (DetallePedido det : pedido.getDetalles()) {
                 insertarDetalle(con, idPedido, det);
-                descontarStock(con, det.getIdProducto(), det.getCantidad());
+                if (!descontarStock(con, det.getIdProducto(), det.getCantidad())) {
+                    throw new DatosException(
+                        "Stock insuficiente para el producto '" + det.getNombreProducto() + "'.");
+                }
             }
 
             // 4. Insertar estado inicial
@@ -198,12 +201,14 @@ public class PedidoDAO {
         }
     }
 
-    private void descontarStock(Connection con, int idProducto, int cantidad) throws SQLException {
+    // El WHERE evita descontar por debajo de cero si otro pedido consumio el stock en paralelo
+    private boolean descontarStock(Connection con, int idProducto, int cantidad) throws SQLException {
         try (PreparedStatement stmt = con.prepareStatement(
-                "UPDATE productos SET stock_actual = stock_actual - ? WHERE id_producto = ?")) {
+                "UPDATE productos SET stock_actual = stock_actual - ? WHERE id_producto = ? AND stock_actual >= ?")) {
             stmt.setInt(1, cantidad);
             stmt.setInt(2, idProducto);
-            stmt.executeUpdate();
+            stmt.setInt(3, cantidad);
+            return stmt.executeUpdate() == 1;
         }
     }
 
