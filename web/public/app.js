@@ -99,10 +99,8 @@ function navegar() {
   } else if (vista === 'mis-pedidos') {
     const email = localStorage.getItem(CLAVE_EMAIL);
     const input = $('#form-mis-pedidos [name=email]');
-    if (email && !input.value) {
-      input.value = email;
-      buscarPedidos(email);
-    }
+    if (!input.value && email) input.value = email;
+    if (input.value) buscarPedidos(input.value);
   } else if (vista === 'seguimiento') {
     const id = parseInt(partes[1], 10);
     if (id > 0) {
