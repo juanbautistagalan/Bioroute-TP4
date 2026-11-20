@@ -110,7 +110,7 @@ cd BioRoute-Logistica
 
 ### 2. Cargar la base de datos
 
-Abrir MySQL Workbench, conectarse a la instancia local y ejecutar el script `bioroute_db.sql`. El script crea la base `bioroute_db` con las seis tablas necesarias y carga datos iniciales: dos usuarios de prueba, tres clientes y cuatro productos.
+Abrir MySQL Workbench, conectarse a la instancia local y ejecutar el script `bioroute_db.sql`. El script crea la base `bioroute_db` con las siete tablas necesarias y carga datos iniciales: dos usuarios de prueba, tres clientes y cuatro productos.
 
 ### 3. Agregar el conector JDBC
 
@@ -173,6 +173,12 @@ mysql -u root -p < sql/portal_web.sql
 
 El script es idempotente (se puede correr más de una vez). El usuario no puede iniciar sesión en la consola: su hash es el marcador `SIN-LOGIN`, que nunca coincide con un hash SHA-256 real.
 
+En una base existente también hay que crear la tabla de cuentas de clientes (en instalaciones nuevas ya la crea `bioroute_db.sql`):
+
+```
+mysql -u root -p < sql/login_clientes.sql
+```
+
 ### 2. Levantar el servidor
 
 ```
@@ -197,9 +203,10 @@ Las variables `BIOROUTE_DB_*` también aplican al servidor web.
 
 ### 3. Vistas
 
-- **Catálogo**: productos con stock, carrito y formulario de datos del cliente. Al confirmar se busca o crea el cliente por email y se registra el pedido con la misma transacción de `PedidoDAO.crear()` que usa la consola. Los precios se toman siempre de la base.
-- **Mis pedidos**: el cliente ingresa su email y ve sus pedidos con el estado actual.
-- **Seguimiento**: línea de tiempo de estados (Pendiente → En preparación → En ruta → Entregado/Cancelado) actualizada en vivo y un mapa con la ruta desde el depósito hasta la dirección del cliente.
+- **Ingresar**: inicio de sesión con email y contraseña, o alta de cuenta (nombre, email, teléfono, dirección y contraseña de al menos 6 caracteres). Si el email ya pertenece a un cliente cargado desde la consola, la cuenta se asocia a ese cliente.
+- **Catálogo**: público. Para confirmar el pedido hay que iniciar sesión; el pedido se registra a nombre del cliente logueado con la misma transacción de `PedidoDAO.crear()` que usa la consola. Los precios se toman siempre de la base.
+- **Mis pedidos**: requiere sesión. Muestra los pedidos del cliente logueado con el estado actual.
+- **Seguimiento**: requiere sesión y solo permite ver pedidos propios. Línea de tiempo de estados (Pendiente → En preparación → En ruta → Entregado/Cancelado) actualizada en vivo y un mapa con la ruta desde el depósito hasta la dirección del cliente.
 
 Los cambios de estado se siguen haciendo desde la consola (perfil Administrativo o Repartidor); la web los refleja en pocos segundos.
 
@@ -208,11 +215,16 @@ Los cambios de estado se siguen haciendo desde la consola (perfil Administrativo
 | Método y ruta | Descripción |
 |---|---|
 | `GET /api/productos` | Productos con stock mayor a 0. |
-| `POST /api/clientes` | Body `{nombre, email, telefono, direccion}`. Devuelve el cliente existente con ese email o lo crea. |
-| `POST /api/pedidos` | Body `{idCliente, items: [{idProducto, cantidad}]}`. Devuelve `201` con el pedido creado; `409` si no hay stock. |
-| `GET /api/pedidos?email=` | Pedidos del cliente con ese email, con `estadoActual` y detalle. |
-| `GET /api/pedidos/{id}` | Detalle del pedido e historial de estados. |
-| `GET /api/pedidos/{id}/eventos` | Server-Sent Events: emite el evento `estado` cada 3 s y cierra la conexión cuando el pedido llega a `Entregado` o `Cancelado`. |
+| `POST /api/auth/registro` | Body `{nombre, email, telefono, direccion, contrasena}`. Crea la cuenta e inicia sesión; `409` si el email ya tiene cuenta. |
+| `POST /api/auth/login` | Body `{email, contrasena}`. Inicia sesión; `401` si los datos no coinciden. |
+| `POST /api/auth/logout` | Cierra la sesión. |
+| `GET /api/auth/sesion` | Cliente logueado; `401` si no hay sesión. |
+| `POST /api/pedidos` | Requiere sesión. Body `{items: [{idProducto, cantidad}]}`. Devuelve `201` con el pedido creado; `409` si no hay stock. |
+| `GET /api/pedidos` | Requiere sesión. Pedidos del cliente logueado, con `estadoActual` y detalle. |
+| `GET /api/pedidos/{id}` | Requiere sesión. Detalle del pedido e historial de estados; `404` si el pedido no es del cliente. |
+| `GET /api/pedidos/{id}/eventos` | Requiere sesión. Server-Sent Events: emite el evento `estado` cada 3 s y cierra la conexión cuando el pedido llega a `Entregado` o `Cancelado`. |
+
+La sesión se guarda en el servidor y el navegador recibe la cookie `JSESSIONID` (`HttpOnly`, `SameSite=Lax`), que vence tras 8 horas sin actividad. Las contraseñas se guardan en la tabla `cuentas_cliente` como hash SHA-256 con sal, con la misma utilidad `HashUtil` que usan los usuarios de la consola. Las sesiones viven en memoria: al reiniciar el servidor los clientes deben volver a ingresar.
 
 ### 5. Mapa y posición simulada
 
@@ -231,10 +243,11 @@ Las contraseñas reales no están almacenadas en la base. Lo que se guarda es el
 
 ## Modelo de datos
 
-La base contiene seis tablas relacionadas:
+La base contiene siete tablas relacionadas:
 
 - `usuarios`: credenciales y perfil. Almacena hash y sal por usuario.
 - `clientes`: datos de contacto de los compradores.
+- `cuentas_cliente`: email, hash y sal para el login de clientes en el portal web.
 - `productos`: catálogo con precio, stock actual y stock mínimo.
 - `pedidos`: cabecera con cliente, usuario que tomó el pedido y estado actual.
 - `detalle_pedido`: productos incluidos en cada pedido con cantidad y subtotal.
@@ -312,7 +325,7 @@ El informe técnico completo del trabajo práctico está en `docs/GALAN-JUANBAUT
 El prototipo no incluye interfaz gráfica de escritorio, reportes en PDF, integraciones externas ni notificaciones por correo o WhatsApp. Estos puntos quedan como evolución futura. Las líneas de trabajo previstas son:
 
 - Migrar la interfaz de consola a JavaFX o Swing.
-- Agregar autenticación de clientes al portal web y un panel web para el personal.
+- Agregar un panel web para el personal.
 - Generar reportes en PDF de pedidos y stock.
 - Implementar bloqueo por intentos fallidos de login.
 - Dockerizar el sistema para facilitar el despliegue.

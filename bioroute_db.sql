@@ -31,6 +31,16 @@ CREATE TABLE clientes (
   email VARCHAR(100)
 );
 
+-- Credenciales de los clientes para el portal web (ver sql/login_clientes.sql)
+CREATE TABLE cuentas_cliente (
+  id_cliente INT PRIMARY KEY,
+  email VARCHAR(100) NOT NULL UNIQUE,
+  hash_contrasena VARCHAR(255) NOT NULL,
+  sal VARCHAR(255) NOT NULL,
+  fecha_alta DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente)
+);
+
 CREATE TABLE productos (
   id_producto INT AUTO_INCREMENT PRIMARY KEY,
   nombre VARCHAR(100) NOT NULL,

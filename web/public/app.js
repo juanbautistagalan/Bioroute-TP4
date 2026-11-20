@@ -14,7 +14,6 @@ const ETIQUETAS = {
   'Entregado': 'Entregado',
   'Cancelado': 'Cancelado'
 };
-const CLAVE_EMAIL = 'bioroute.email';
 const CLAVE_GEOCODIFICACION = 'bioroute.geo.v2.';
 // Zona de reparto: resultados más lejos que esto del depósito se descartan
 const RADIO_REPARTO_KM = 60;
@@ -62,7 +61,7 @@ function avisar(texto) {
 }
 
 async function api(ruta, opciones = {}) {
-  const config = { headers: { 'Accept': 'application/json' }, ...opciones };
+  const config = { headers: { 'Accept': 'application/json' }, credentials: 'same-origin', ...opciones };
   if (config.body && typeof config.body !== 'string') {
     config.body = JSON.stringify(config.body);
     config.headers['Content-Type'] = 'application/json';
@@ -74,18 +73,109 @@ async function api(ruta, opciones = {}) {
     throw new Error('No se pudo conectar con el servidor.');
   }
   const datos = await respuesta.json().catch(() => null);
+  if (respuesta.status === 401 && !ruta.startsWith('/api/auth/')) {
+    // La sesión venció o se cerró en otra pestaña
+    establecerSesion(null);
+    pedirIngreso();
+  }
   if (!respuesta.ok) {
-    throw new Error((datos && datos.error) || 'Error ' + respuesta.status + ' en el servidor.');
+    throw new Error((datos && (datos.error || datos.title)) || 'Error ' + respuesta.status + ' en el servidor.');
   }
   return datos;
 }
 
 // ---------------------------------------------------------------------
-// Navegación entre vistas (hash): #/catalogo, #/mis-pedidos, #/seguimiento/12
+// Sesión del cliente
+// ---------------------------------------------------------------------
+let clienteActual = null;
+let destinoTrasIngreso = null;
+const VISTAS_PRIVADAS = ['mis-pedidos', 'seguimiento'];
+
+function establecerSesion(cliente) {
+  clienteActual = cliente;
+  $('#sesion-ingresar').hidden = !!cliente;
+  $('#sesion-activa').hidden = !cliente;
+  $('#sesion-nombre').textContent = cliente ? cliente.nombre : '';
+  const entrega = $('#datos-entrega');
+  if (cliente) {
+    entrega.textContent = cliente.nombre + ' · ' + cliente.direccion;
+  } else {
+    entrega.replaceChildren('Para confirmar el pedido ');
+    const enlace = crear('a', 'enlace', 'iniciá sesión o creá tu cuenta');
+    enlace.href = '#/ingresar';
+    enlace.addEventListener('click', () => { destinoTrasIngreso = '#/catalogo'; });
+    entrega.append(enlace, '.');
+  }
+  renderizarCarrito();
+}
+
+function pedirIngreso() {
+  if (location.hash.startsWith('#/ingresar')) return;
+  destinoTrasIngreso = location.hash || '#/catalogo';
+  location.hash = '#/ingresar';
+}
+
+async function cargarSesion() {
+  try {
+    const { cliente } = await api('/api/auth/sesion');
+    establecerSesion(cliente);
+  } catch (e) {
+    establecerSesion(null);
+  }
+}
+
+async function enviarAcceso(evento, ruta, mensaje) {
+  evento.preventDefault();
+  const form = evento.target;
+  if (!form.checkValidity()) {
+    form.reportValidity();
+    return;
+  }
+  const boton = form.querySelector('button[type=submit]');
+  boton.disabled = true;
+  mostrarMensaje(mensaje, '');
+  try {
+    const { cliente } = await api(ruta, { method: 'POST', body: Object.fromEntries(new FormData(form)) });
+    form.reset();
+    establecerSesion(cliente);
+    avisar('Hola, ' + cliente.nombre + '.');
+    location.hash = destinoTrasIngreso || '#/catalogo';
+    destinoTrasIngreso = null;
+  } catch (e) {
+    mostrarMensaje(mensaje, e.message, 'error');
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+async function cerrarSesion() {
+  try {
+    await api('/api/auth/logout', { method: 'POST' });
+  } catch (e) {
+    // Aunque falle la red, se limpia la sesión local
+  }
+  detenerSeguimiento();
+  $('#lista-pedidos').replaceChildren();
+  establecerSesion(null);
+  avisar('Cerraste sesión.');
+  location.hash = '#/catalogo';
+}
+
+// ---------------------------------------------------------------------
+// Navegación entre vistas (hash): #/catalogo, #/mis-pedidos, #/seguimiento/12, #/ingresar
 // ---------------------------------------------------------------------
 function navegar() {
   const partes = location.hash.replace(/^#\/?/, '').split('/');
-  const vista = ['catalogo', 'mis-pedidos', 'seguimiento'].includes(partes[0]) ? partes[0] : 'catalogo';
+  let vista = ['catalogo', 'mis-pedidos', 'seguimiento', 'ingresar'].includes(partes[0]) ? partes[0] : 'catalogo';
+
+  if (VISTAS_PRIVADAS.includes(vista) && !clienteActual) {
+    pedirIngreso();
+    return;
+  }
+  if (vista === 'ingresar' && clienteActual) {
+    location.hash = '#/catalogo';
+    return;
+  }
 
   document.querySelectorAll('.vista').forEach((s) => { s.hidden = s.id !== 'vista-' + vista; });
   document.querySelectorAll('.navegacion a').forEach((a) => {
@@ -97,10 +187,11 @@ function navegar() {
   if (vista === 'catalogo') {
     cargarProductos();
   } else if (vista === 'mis-pedidos') {
-    const email = localStorage.getItem(CLAVE_EMAIL);
-    const input = $('#form-mis-pedidos [name=email]');
-    if (!input.value && email) input.value = email;
-    if (input.value) buscarPedidos(input.value);
+    buscarPedidos();
+  } else if (vista === 'ingresar') {
+    $('#subtitulo-ingresar').textContent = destinoTrasIngreso && destinoTrasIngreso !== '#/catalogo'
+      ? 'Iniciá sesión para ver tus pedidos.'
+      : 'Iniciá sesión o creá tu cuenta para hacer y seguir pedidos.';
   } else if (vista === 'seguimiento') {
     const id = parseInt(partes[1], 10);
     if (id > 0) {
@@ -217,15 +308,14 @@ function renderizarCarrito() {
   lista.replaceChildren(...items);
   $('#carrito-vacio').hidden = items.length > 0;
   $('#carrito-total').textContent = formatoPesos.format(total);
-  $('#btn-confirmar').disabled = items.length === 0;
+  $('#btn-confirmar').disabled = items.length === 0 || !clienteActual;
 }
 
 async function confirmarPedido(evento) {
   evento.preventDefault();
-  const form = evento.target;
   const mensaje = $('#mensaje-pedido');
-  if (!form.checkValidity()) {
-    form.reportValidity();
+  if (!clienteActual) {
+    pedirIngreso();
     return;
   }
   if (carrito.size === 0) {
@@ -233,24 +323,16 @@ async function confirmarPedido(evento) {
     return;
   }
 
-  const datos = Object.fromEntries(new FormData(form));
   const boton = $('#btn-confirmar');
   boton.disabled = true;
   mostrarMensaje(mensaje, 'Procesando pedido...');
 
   try {
-    const { cliente, creado } = await api('/api/clientes', { method: 'POST', body: datos });
     const items = [...carrito].map(([idProducto, cantidad]) => ({ idProducto, cantidad }));
-    const pedido = await api('/api/pedidos', {
-      method: 'POST',
-      body: { idCliente: cliente.idCliente, items }
-    });
+    const pedido = await api('/api/pedidos', { method: 'POST', body: { items } });
 
-    localStorage.setItem(CLAVE_EMAIL, cliente.email);
     carrito.clear();
-    form.reset();
-    let texto = 'Pedido #' + pedido.idPedido + ' confirmado por ' + formatoPesos.format(pedido.total) + '.';
-    if (!creado) texto += ' Ya estabas registrado: se entregará en ' + cliente.direccion + '.';
+    const texto = 'Pedido #' + pedido.idPedido + ' confirmado por ' + formatoPesos.format(pedido.total) + '.';
     mostrarMensaje(mensaje, texto, 'exito');
     const enlace = crear('a', 'enlace', ' Seguir pedido');
     enlace.href = '#/seguimiento/' + pedido.idPedido;
@@ -265,16 +347,15 @@ async function confirmarPedido(evento) {
 // ---------------------------------------------------------------------
 // Vista 2: mis pedidos
 // ---------------------------------------------------------------------
-async function buscarPedidos(email) {
+async function buscarPedidos() {
   const mensaje = $('#mensaje-mis-pedidos');
   const lista = $('#lista-pedidos');
   mostrarMensaje(mensaje, 'Buscando pedidos...');
   lista.replaceChildren();
   try {
-    const pedidos = await api('/api/pedidos?email=' + encodeURIComponent(email));
-    localStorage.setItem(CLAVE_EMAIL, email.trim().toLowerCase());
+    const pedidos = await api('/api/pedidos');
     if (pedidos.length === 0) {
-      mostrarMensaje(mensaje, 'No encontramos pedidos para ' + email + '.');
+      mostrarMensaje(mensaje, 'Todavía no hiciste pedidos.');
       return;
     }
     mostrarMensaje(mensaje, '');
@@ -634,17 +715,17 @@ function animar() {
 // ---------------------------------------------------------------------
 // Inicio
 // ---------------------------------------------------------------------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   $('#form-cliente').addEventListener('submit', confirmarPedido);
-  $('#form-mis-pedidos').addEventListener('submit', (e) => {
-    e.preventDefault();
-    buscarPedidos($('#form-mis-pedidos [name=email]').value);
-  });
+  $('#form-login').addEventListener('submit', (e) => enviarAcceso(e, '/api/auth/login', $('#mensaje-login')));
+  $('#form-registro').addEventListener('submit', (e) => enviarAcceso(e, '/api/auth/registro', $('#mensaje-registro')));
+  $('#btn-salir').addEventListener('click', cerrarSesion);
   $('#form-seguimiento').addEventListener('submit', (e) => {
     e.preventDefault();
     const id = parseInt($('#form-seguimiento [name=idPedido]').value, 10);
     if (id > 0) location.hash = '#/seguimiento/' + id;
   });
   window.addEventListener('hashchange', navegar);
+  await cargarSesion();
   navegar();
 });
