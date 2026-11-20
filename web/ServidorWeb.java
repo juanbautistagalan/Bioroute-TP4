@@ -54,6 +54,7 @@ public class ServidorWeb {
     private static final int PUERTO_DEFECTO = 8080;
     private static final String USUARIO_PORTAL_DEFECTO = "portal-web";
     private static final int INTERVALO_SSE_SEGUNDOS = 3;
+    private static final int CANTIDAD_MAXIMA = 10_000;
     private static final Set<String> ESTADOS_FINALES = Set.of("Entregado", "Cancelado");
     private static final Pattern PATRON_EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     private static final Path CARPETA_PUBLICA = Path.of("web", "public");
@@ -182,10 +183,15 @@ public class ServidorWeb {
         // Agrupar cantidades por producto (por si el mismo producto viene repetido)
         Map<Integer, Integer> cantidades = new LinkedHashMap<>();
         for (ItemPedido item : solicitud.items()) {
-            if (item == null || item.idProducto() == null || item.cantidad() == null || item.cantidad() <= 0) {
-                throw new ValidacionException("Cada item debe tener idProducto y una cantidad positiva.");
+            if (item == null || item.idProducto() == null || item.cantidad() == null
+                    || item.cantidad() <= 0 || item.cantidad() > CANTIDAD_MAXIMA) {
+                throw new ValidacionException("Cada item debe tener idProducto y una cantidad entre 1 y "
+                    + CANTIDAD_MAXIMA + ".");
             }
-            cantidades.merge(item.idProducto(), item.cantidad(), Integer::sum);
+            int total = cantidades.merge(item.idProducto(), item.cantidad(), Integer::sum);
+            if (total > CANTIDAD_MAXIMA) {
+                throw new ValidacionException("La cantidad por producto no puede superar " + CANTIDAD_MAXIMA + ".");
+            }
         }
 
         Map<Integer, Producto> catalogo = new LinkedHashMap<>();
