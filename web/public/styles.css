@@ -47,6 +47,13 @@ h3 { margin: 0; font-size: 1rem; }
   background: var(--blanco); color: var(--verde-oscuro); font-weight: 800;
 }
 .navegacion { display: flex; gap: 4px; }
+.sesion { display: flex; align-items: center; }
+.sesion-activa { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.boton-claro { background: rgba(255, 255, 255, 0.15); color: var(--blanco); text-decoration: none; }
+.boton-claro:hover { background: rgba(255, 255, 255, 0.3); }
+.acceso-layout { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 820px; }
+.acceso-layout .formulario { margin-top: 0; }
+.datos-entrega { margin: 0; color: var(--gris); }
 .navegacion a {
   color: var(--blanco); text-decoration: none;
   padding: 8px 14px; border-radius: 999px; opacity: 0.85;

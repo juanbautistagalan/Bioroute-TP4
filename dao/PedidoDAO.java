@@ -80,14 +80,14 @@ public class PedidoDAO {
      * Lista los pedidos de un cliente (buscado por email) con su estado actual y detalles,
      * del mas reciente al mas antiguo.
      */
-    public ArrayList<Pedido> listarPorEmailCliente(String email) throws DatosException {
+    public ArrayList<Pedido> listarPorCliente(int idCliente) throws DatosException {
         String sql = SELECT_PEDIDOS +
-                     "WHERE c.email = ? " +
+                     "WHERE p.id_cliente = ? " +
                      "ORDER BY p.fecha_creacion DESC, p.id_pedido DESC, d.id_detalle ASC";
         try (Connection con = ConexionBD.obtenerConexion();
              PreparedStatement stmt = con.prepareStatement(sql)) {
 
-            stmt.setString(1, email);
+            stmt.setInt(1, idCliente);
             return mapearPedidos(stmt);
         } catch (SQLException e) {
             throw new DatosException("Error al listar pedidos del cliente.", e);

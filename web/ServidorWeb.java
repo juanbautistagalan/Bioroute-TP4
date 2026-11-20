@@ -1,6 +1,7 @@
 package bioroute.web;
 
 import bioroute.dao.ClienteDAO;
+import bioroute.dao.CuentaClienteDAO;
 import bioroute.dao.EstadoPedidoDAO;
 import bioroute.dao.PedidoDAO;
 import bioroute.dao.ProductoDAO;
@@ -13,6 +14,7 @@ import bioroute.modelo.EstadoPedido;
 import bioroute.modelo.Pedido;
 import bioroute.modelo.Producto;
 import bioroute.util.AuditoriaArchivo;
+import bioroute.util.HashUtil;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -21,9 +23,13 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.javalin.Javalin;
 import io.javalin.http.Context;
 import io.javalin.http.HttpStatus;
+import io.javalin.http.UnauthorizedResponse;
 import io.javalin.http.sse.SseClient;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.json.JavalinJackson;
+import jakarta.servlet.http.HttpSession;
+import org.eclipse.jetty.http.HttpCookie;
+import org.eclipse.jetty.server.session.SessionHandler;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -58,9 +64,13 @@ public class ServidorWeb {
     private static final Set<String> ESTADOS_FINALES = Set.of("Entregado", "Cancelado");
     private static final Pattern PATRON_EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     private static final Path CARPETA_PUBLICA = Path.of("web", "public");
+    private static final String ATRIBUTO_CLIENTE = "idCliente";
+    private static final int CONTRASENA_MINIMA = 6;
+    private static final int SESION_MAXIMA_SEGUNDOS = 8 * 60 * 60;
 
     private final ProductoDAO productoDAO = new ProductoDAO();
     private final ClienteDAO clienteDAO = new ClienteDAO();
+    private final CuentaClienteDAO cuentaClienteDAO = new CuentaClienteDAO();
     private final PedidoDAO pedidoDAO = new PedidoDAO();
     private final EstadoPedidoDAO estadoPedidoDAO = new EstadoPedidoDAO();
     private final UsuarioDAO usuarioDAO = new UsuarioDAO();
@@ -75,9 +85,11 @@ public class ServidorWeb {
     });
 
     // Cuerpos JSON esperados por la API
-    public record SolicitudCliente(String nombre, String email, String telefono, String direccion) { }
+    public record SolicitudRegistro(String nombre, String email, String telefono, String direccion,
+                                    String contrasena) { }
+    public record SolicitudLogin(String email, String contrasena) { }
     public record ItemPedido(Integer idProducto, Integer cantidad) { }
-    public record SolicitudPedido(Integer idCliente, List<ItemPedido> items) { }
+    public record SolicitudPedido(List<ItemPedido> items) { }
 
     public ServidorWeb(String nombreUsuarioPortal) {
         this.nombreUsuarioPortal = nombreUsuarioPortal;
@@ -98,6 +110,13 @@ public class ServidorWeb {
 
         Javalin app = Javalin.create(config -> {
             config.jsonMapper(new JavalinJackson(mapper, false));
+            config.jetty.modifyServletContextHandler(contexto -> {
+                SessionHandler sesiones = new SessionHandler();
+                sesiones.setHttpOnly(true);
+                sesiones.setSameSite(HttpCookie.SameSite.LAX);
+                sesiones.setMaxInactiveInterval(SESION_MAXIMA_SEGUNDOS);
+                contexto.setSessionHandler(sesiones);
+            });
             config.staticFiles.add(estaticos -> {
                 estaticos.hostedPath = "/";
                 if (Files.isDirectory(CARPETA_PUBLICA)) {
@@ -113,9 +132,12 @@ public class ServidorWeb {
         });
 
         app.get("/api/productos", this::listarProductos);
-        app.post("/api/clientes", this::crearOBuscarCliente);
+        app.post("/api/auth/registro", this::registrar);
+        app.post("/api/auth/login", this::iniciarSesion);
+        app.post("/api/auth/logout", this::cerrarSesion);
+        app.get("/api/auth/sesion", this::sesionActual);
         app.post("/api/pedidos", this::crearPedido);
-        app.get("/api/pedidos", this::listarPedidosPorEmail);
+        app.get("/api/pedidos", this::listarMisPedidos);
         app.get("/api/pedidos/{id}", this::detallePedido);
         app.sse("/api/pedidos/{id}/eventos", this::seguirPedido);
 
@@ -144,40 +166,69 @@ public class ServidorWeb {
         ctx.json(respuesta);
     }
 
-    private void crearOBuscarCliente(Context ctx) throws DatosException, ValidacionException {
-        SolicitudCliente solicitud = leerCuerpo(ctx, SolicitudCliente.class);
+    private void registrar(Context ctx) throws DatosException, ValidacionException {
+        SolicitudRegistro solicitud = leerCuerpo(ctx, SolicitudRegistro.class);
         String email = normalizarEmail(solicitud.email());
+        String contrasena = validarContrasena(solicitud.contrasena());
 
-        Cliente existente = clienteDAO.buscarPorEmail(email);
-        if (existente != null) {
-            ctx.json(Map.of("cliente", mapaCliente(existente), "creado", false));
+        if (cuentaClienteDAO.buscarPorEmail(email) != null) {
+            error(ctx, HttpStatus.CONFLICT, "Ya existe una cuenta con ese email. Inicia sesion.");
             return;
         }
 
-        String nombre = textoObligatorio(solicitud.nombre(), "nombre", 100);
-        String direccion = textoObligatorio(solicitud.direccion(), "direccion", 200);
-        String telefono = textoOpcional(solicitud.telefono(), "telefono", 20);
+        // Si el cliente ya existia (cargado desde la consola) se le crea la cuenta; si no, se da de alta
+        Cliente cliente = clienteDAO.buscarPorEmail(email);
+        if (cliente == null) {
+            String nombre = textoObligatorio(solicitud.nombre(), "nombre", 100);
+            String direccion = textoObligatorio(solicitud.direccion(), "direccion", 200);
+            String telefono = textoOpcional(solicitud.telefono(), "telefono", 20);
+            int id = clienteDAO.crear(new Cliente(nombre, telefono, direccion, email));
+            cliente = new Cliente(id, nombre, telefono, direccion, email);
+        }
 
-        Cliente nuevo = new Cliente(nombre, telefono, direccion, email);
-        int id = clienteDAO.crear(nuevo);
-        AuditoriaArchivo.registrar("Portal web - cliente registrado: " + nombre + " (" + email + ")");
+        String sal = HashUtil.generarSal();
+        if (!cuentaClienteDAO.crear(cliente.getIdCliente(), email, HashUtil.hashear(contrasena, sal), sal)) {
+            error(ctx, HttpStatus.CONFLICT, "Ya existe una cuenta con ese email. Inicia sesion.");
+            return;
+        }
+        AuditoriaArchivo.registrar("Portal web - cuenta creada: " + email);
 
-        ctx.status(HttpStatus.CREATED).json(Map.of(
-            "cliente", mapaCliente(new Cliente(id, nombre, telefono, direccion, email)),
-            "creado", true));
+        abrirSesion(ctx, cliente.getIdCliente());
+        ctx.status(HttpStatus.CREATED).json(Map.of("cliente", mapaCliente(cliente)));
+    }
+
+    private void iniciarSesion(Context ctx) throws DatosException, ValidacionException {
+        SolicitudLogin solicitud = leerCuerpo(ctx, SolicitudLogin.class);
+        String email = solicitud.email() == null ? "" : solicitud.email().trim().toLowerCase();
+        String contrasena = solicitud.contrasena() == null ? "" : solicitud.contrasena();
+
+        CuentaClienteDAO.Cuenta cuenta = cuentaClienteDAO.buscarPorEmail(email);
+        if (cuenta == null || !HashUtil.verificar(contrasena, cuenta.sal(), cuenta.hashContrasena())) {
+            error(ctx, HttpStatus.UNAUTHORIZED, "Email o contrasena incorrectos.");
+            return;
+        }
+        Cliente cliente = clienteDAO.buscarPorId(cuenta.idCliente());
+        abrirSesion(ctx, cuenta.idCliente());
+        AuditoriaArchivo.registrar("Portal web - inicio de sesion: " + email);
+        ctx.json(Map.of("cliente", mapaCliente(cliente)));
+    }
+
+    private void cerrarSesion(Context ctx) {
+        HttpSession sesion = ctx.req().getSession(false);
+        if (sesion != null) sesion.invalidate();
+        ctx.status(HttpStatus.NO_CONTENT);
+    }
+
+    private void sesionActual(Context ctx) throws DatosException {
+        Cliente cliente = clienteDAO.buscarPorId(idClienteSesion(ctx));
+        ctx.json(Map.of("cliente", mapaCliente(cliente)));
     }
 
     private void crearPedido(Context ctx) throws DatosException, ValidacionException {
         SolicitudPedido solicitud = leerCuerpo(ctx, SolicitudPedido.class);
-        if (solicitud.idCliente() == null || solicitud.idCliente() <= 0) {
-            throw new ValidacionException("Falta el idCliente.");
-        }
+        int idCliente = idClienteSesion(ctx);
         if (solicitud.items() == null || solicitud.items().isEmpty()) {
             throw new ValidacionException("El pedido debe tener al menos un producto.");
-        }
-        if (clienteDAO.buscarPorId(solicitud.idCliente()) == null) {
-            error(ctx, HttpStatus.NOT_FOUND, "No existe el cliente " + solicitud.idCliente() + ".");
-            return;
         }
 
         // Agrupar cantidades por producto (por si el mismo producto viene repetido)
@@ -198,7 +249,7 @@ public class ServidorWeb {
         for (Producto p : productoDAO.listar()) catalogo.put(p.getIdProducto(), p);
 
         // El precio se toma siempre de la base, nunca del cliente
-        Pedido pedido = new Pedido(solicitud.idCliente(), obtenerIdUsuarioPortal());
+        Pedido pedido = new Pedido(idCliente, obtenerIdUsuarioPortal());
         for (Map.Entry<Integer, Integer> entrada : cantidades.entrySet()) {
             Producto producto = catalogo.get(entrada.getKey());
             if (producto == null) {
@@ -222,19 +273,20 @@ public class ServidorWeb {
             "total", pedido.calcularTotal()));
     }
 
-    private void listarPedidosPorEmail(Context ctx) throws DatosException, ValidacionException {
-        String email = normalizarEmail(ctx.queryParam("email"));
+    private void listarMisPedidos(Context ctx) throws DatosException {
         List<Map<String, Object>> respuesta = new ArrayList<>();
-        for (Pedido p : pedidoDAO.listarPorEmailCliente(email)) {
+        for (Pedido p : pedidoDAO.listarPorCliente(idClienteSesion(ctx))) {
             respuesta.add(mapaPedido(p));
         }
         ctx.json(respuesta);
     }
 
     private void detallePedido(Context ctx) throws DatosException, ValidacionException {
+        int idCliente = idClienteSesion(ctx);
         int idPedido = leerIdPedido(ctx);
         Pedido pedido = pedidoDAO.buscarPorId(idPedido);
-        if (pedido == null) {
+        // Un pedido ajeno se responde igual que uno inexistente
+        if (pedido == null || pedido.getIdCliente() != idCliente) {
             error(ctx, HttpStatus.NOT_FOUND, "No existe el pedido " + idPedido + ".");
             return;
         }
@@ -253,6 +305,24 @@ public class ServidorWeb {
             idPedido = Integer.parseInt(cliente.ctx().pathParam("id"));
         } catch (NumberFormatException e) {
             cliente.sendEvent("error", Map.of("mensaje", "Identificador de pedido invalido."));
+            cliente.close();
+            return;
+        }
+        Integer idCliente = cliente.ctx().sessionAttribute(ATRIBUTO_CLIENTE);
+        if (idCliente == null) {
+            cliente.sendEvent("error", Map.of("mensaje", "Inicia sesion para seguir tus pedidos."));
+            cliente.close();
+            return;
+        }
+        try {
+            Pedido pedido = pedidoDAO.buscarPorId(idPedido);
+            if (pedido == null || pedido.getIdCliente() != idCliente) {
+                cliente.sendEvent("error", Map.of("mensaje", "No existe el pedido " + idPedido + "."));
+                cliente.close();
+                return;
+            }
+        } catch (DatosException e) {
+            cliente.sendEvent("error", Map.of("mensaje", e.getMessage()));
             cliente.close();
             return;
         }
@@ -402,6 +472,28 @@ public class ServidorWeb {
             idUsuarioPortal = id;
         }
         return idUsuarioPortal;
+    }
+
+    private static int idClienteSesion(Context ctx) {
+        Integer idCliente = ctx.sessionAttribute(ATRIBUTO_CLIENTE);
+        if (idCliente == null) throw new UnauthorizedResponse("Inicia sesion para continuar.");
+        return idCliente;
+    }
+
+    // Se descarta la sesion anterior para evitar fijacion de sesion
+    private static void abrirSesion(Context ctx, int idCliente) {
+        HttpSession anterior = ctx.req().getSession(false);
+        if (anterior != null) anterior.invalidate();
+        ctx.req().getSession(true);
+        ctx.sessionAttribute(ATRIBUTO_CLIENTE, idCliente);
+    }
+
+    private static String validarContrasena(String contrasena) throws ValidacionException {
+        if (contrasena == null || contrasena.length() < CONTRASENA_MINIMA) {
+            throw new ValidacionException("La contrasena debe tener al menos " + CONTRASENA_MINIMA + " caracteres.");
+        }
+        if (contrasena.length() > 100) throw new ValidacionException("La contrasena admite hasta 100 caracteres.");
+        return contrasena;
     }
 
     private static <T> T leerCuerpo(Context ctx, Class<T> tipo) throws ValidacionException {
