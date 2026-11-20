@@ -54,4 +54,21 @@ public class UsuarioDAO {
             throw new DatosException("Error al autenticar usuario.", e);
         }
     }
+
+    /**
+     * Devuelve el id del usuario con ese nombre, o -1 si no existe.
+     */
+    public int buscarIdPorNombre(String nombreUsuario) throws DatosException {
+        String sql = "SELECT id_usuario FROM usuarios WHERE nombre_usuario = ?";
+        try (Connection conexion = ConexionBD.obtenerConexion();
+             PreparedStatement stmt = conexion.prepareStatement(sql)) {
+
+            stmt.setString(1, nombreUsuario);
+            try (ResultSet rs = stmt.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : -1;
+            }
+        } catch (SQLException e) {
+            throw new DatosException("Error al buscar usuario.", e);
+        }
+    }
 }

@@ -7,21 +7,33 @@ import java.sql.SQLException;
 
 /**
  * Gestor de conexion a MySQL para BioRoute.
- * Lee las credenciales desde constantes para simplificar el prototipo academico.
+ * Lee las credenciales desde variables de entorno, con valores por defecto
+ * para el entorno local del prototipo academico.
  */
 public final class ConexionBD {
 
     // =====================================================================
-    // EDITAR ESTAS 3 LINEAS CON LOS DATOS DE TU MYSQL LOCAL
+    // Las credenciales se leen de variables de entorno. Si no estan
+    // definidas se usan estos valores por defecto (MySQL local).
+    //   BIOROUTE_DB_URL, BIOROUTE_DB_USER, BIOROUTE_DB_PASSWORD
     // =====================================================================
-    private static final String URL =
+    private static final String URL_DEFECTO =
         "jdbc:mysql://localhost:3306/bioroute_db?useSSL=false&serverTimezone=America/Argentina/Buenos_Aires&allowPublicKeyRetrieval=true";
-    private static final String USER = "root";
-    private static final String PASSWORD = "1234"; // <-- poner tu password real de MySQL
+    private static final String USER_DEFECTO = "root";
+    private static final String PASSWORD_DEFECTO = "1234"; // <-- o definir BIOROUTE_DB_PASSWORD
+
+    private static final String URL = leerEntorno("BIOROUTE_DB_URL", URL_DEFECTO);
+    private static final String USER = leerEntorno("BIOROUTE_DB_USER", USER_DEFECTO);
+    private static final String PASSWORD = leerEntorno("BIOROUTE_DB_PASSWORD", PASSWORD_DEFECTO);
     // =====================================================================
 
     private ConexionBD() {
         // utilitaria, no se instancia
+    }
+
+    private static String leerEntorno(String nombre, String valorPorDefecto) {
+        String valor = System.getenv(nombre);
+        return (valor == null || valor.isBlank()) ? valorPorDefecto : valor;
     }
 
     public static Connection obtenerConexion() throws DatosException {

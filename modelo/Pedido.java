@@ -13,12 +13,27 @@ public class Pedido {
     private LocalDateTime fechaCreacion;
     private String estadoActual;
     private ArrayList<DetallePedido> detalles;
+    private String nombreCliente;
+    private String direccionCliente;
 
     public Pedido(int idCliente, int idUsuario) {
         this.idCliente = idCliente;
         this.idUsuario = idUsuario;
         this.fechaCreacion = LocalDateTime.now();
         this.estadoActual = "Pendiente";
+        this.detalles = new ArrayList<>();
+    }
+
+    // Constructor para hidratar desde la base de datos
+    public Pedido(int idPedido, int idCliente, int idUsuario, LocalDateTime fechaCreacion,
+                  String estadoActual, String nombreCliente, String direccionCliente) {
+        this.idPedido = idPedido;
+        this.idCliente = idCliente;
+        this.idUsuario = idUsuario;
+        this.fechaCreacion = fechaCreacion;
+        this.estadoActual = estadoActual;
+        this.nombreCliente = nombreCliente;
+        this.direccionCliente = direccionCliente;
         this.detalles = new ArrayList<>();
     }
 
@@ -41,4 +56,6 @@ public class Pedido {
     public LocalDateTime getFechaCreacion() { return fechaCreacion; }
     public String getEstadoActual() { return estadoActual; }
     public ArrayList<DetallePedido> getDetalles() { return detalles; }
+    public String getNombreCliente() { return nombreCliente; }
+    public String getDireccionCliente() { return direccionCliente; }
 }

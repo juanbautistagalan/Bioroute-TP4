@@ -60,4 +60,47 @@ public class ClienteDAO implements CrudRepository<Cliente> {
             throw new DatosException("Error al listar clientes.", e);
         }
     }
+
+    public Cliente buscarPorEmail(String email) throws DatosException {
+        String sql = "SELECT id_cliente, nombre, telefono, direccion, email FROM clientes " +
+                     "WHERE email = ? ORDER BY id_cliente LIMIT 1";
+        try (Connection con = ConexionBD.obtenerConexion();
+             PreparedStatement stmt = con.prepareStatement(sql)) {
+
+            stmt.setString(1, email);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) return null;
+                return new Cliente(
+                    rs.getInt("id_cliente"),
+                    rs.getString("nombre"),
+                    rs.getString("telefono"),
+                    rs.getString("direccion"),
+                    rs.getString("email")
+                );
+            }
+        } catch (SQLException e) {
+            throw new DatosException("Error al buscar cliente por email.", e);
+        }
+    }
+
+    public Cliente buscarPorId(int idCliente) throws DatosException {
+        String sql = "SELECT id_cliente, nombre, telefono, direccion, email FROM clientes WHERE id_cliente = ?";
+        try (Connection con = ConexionBD.obtenerConexion();
+             PreparedStatement stmt = con.prepareStatement(sql)) {
+
+            stmt.setInt(1, idCliente);
+            try (ResultSet rs = stmt.executeQuery()) {
+                if (!rs.next()) return null;
+                return new Cliente(
+                    rs.getInt("id_cliente"),
+                    rs.getString("nombre"),
+                    rs.getString("telefono"),
+                    rs.getString("direccion"),
+                    rs.getString("email")
+                );
+            }
+        } catch (SQLException e) {
+            throw new DatosException("Error al buscar cliente.", e);
+        }
+    }
 }
